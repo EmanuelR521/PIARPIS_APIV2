@@ -1,0 +1,56 @@
+Parkings:
+- id: 1
+  in_time: '2021-10-10 10:00:00'
+  invoice: 10000
+  name: civic con portatil
+  out_time: '2021-10-10 12:00:00'
+  plate: ABC123
+- id: 2
+  in_time: '2021-10-10 10:00:00'
+  invoice: 20000
+  name: bmw verde
+  out_time: '2021-10-10 12:00:00'
+  plate: DEF456
+- id: 3
+  in_time: '2021-10-10 10:00:00'
+  invoice: 30000
+  name: audi rojo
+  out_time: '2021-10-10 12:00:00'
+  plate: GHI789
+- id: 4
+  in_time: '2021-10-10 10:00:00'
+  invoice: 40000
+  name: mazda 3
+  out_time: null
+  plate: JKL012
+- id: 5
+  in_time: '2021-10-10 10:00:00'
+  invoice: 50000
+  name: chevrolet
+  out_time: null
+  plate: MNO345
+- Id: 6
+  in_time: test
+  invoice: test
+  name: test
+  out_time: test
+  plate: test
+- Id: 7
+  in_time: test
+  invoice: test
+  name: test
+  out_time: test
+  plate: test
+- Id: 8
+  in_time: '0'
+  invoice: '1000'
+  name: elmer
+  out_time: 'null'
+  plate: dft45r
+Usr:
+- _password: admin
+  name: admin@piarpis.com
+- _password: user
+  name: user@piarpis.com
+- _password: '1234'
+  name: andres.felipe@piarpis.com

@@ -1,8 +1,8 @@
 mongo:
   mongo_db: your_db_name
   mongo_uri: db.yaml
-flask:
-  secret: root1234
+jwt:
+  secret: hola
 ia:
   ip: 0.0.0.0
   port: 5000

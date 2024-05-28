@@ -1,71 +1,54 @@
 #flask api
 import requests
 from flask import Flask, request, jsonify, Response
-from pymongo import MongoClient
 from flask_pymongo import PyMongo
-import pymongo
 import json
 from config import config
 from functools import wraps
 from datetime import datetime as dt
 from flask_cors import CORS
-import hashlib
-from bson import json_util, ObjectId
+from bson import json_util
+from datetime import datetime, timedelta, timezone
+import controllers.authController as authController
+import bcrypt
+import middleware.tokenMiddleware as tokenMiddleware
+from bson import ObjectId
 
 api = Flask(__name__)
 cors = CORS(api)
 
 api.config['CORS_HEADERS'] = 'Content-Type'
 api.config['MONGO_URI'] = 'mongodb://localhost:27017/piaprisPrueba'
+
 mongo = PyMongo(api)
 
 conf = config()
 
 session = []
 
-def connect_to_database():
-    try:
-        client = MongoClient(conf.mongo_uri)
-        return client[conf.mongo_db]
-    except ConnectionError as e:
-        print(f"Error connecting to database ----> {e}\n\n")
-        raise e
-
-def login_required(func): # Wrapper to check if the user is in session if required
-    @wraps(func)
-    def wrapper(*args, **kwargs):
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = request.headers.get('token')
+        if not token:
+            return jsonify({'message': 'Token is missing!'}), 401
         try:
-            username_hash = request.headers.get('hash')
-            if username_hash not in session:
-                return jsonify({'message': 'user not in session'}), 401
-            return func(*args, **kwargs)
+            data = tokenMiddleware.decode_token(token)
+            if not data:
+                return jsonify({'message': 'Token is invalid or expired!'}), 401
+            # Obtener el usuario basado en los datos del token
+            current_user = mongo.db.users.find_one({'username': data['username']})
         except Exception as e:
-            print(f"Error checking if user is in session ----> {e}\n\n")
-            return jsonify({'message': 'error checking if user is in session'}), 500
-    return wrapper
+            print(f"Error decoding token: {e}")
+            return jsonify({'message': 'Token is invalid!'}), 401
+        return f(*args, **kwargs)
+    return decorated
 
-def checkPassword(username,password) -> bool: # check if the password is correct
-    try:
-        userFound = mongo.db.users.find_one({'username': username})
-        print(f"User found ----> {userFound}\n\n")
-        if f"{password}" == f"{userFound['password']}":
-            return True
-        database = connect_to_database()
-        users_collection = database['Usr']
-        user = users_collection.find_one({'name': username})
-        if not user:
-            return False
-        
-        hashed_password = user['_password']
-            
-        if f"{password}" == f"{hashed_password}":
-            return True
-        else:
-            return False
-    except Exception as e:
-        print(f"Error checking password ----> {e}\n\n")
-        return False
-
+@api.route('/login', methods=['POST'])
+def login():
+    response = authController.login()
+    return response
+    
 @api.route('/',methods=['GET'])
 def ping():
     html = """
@@ -85,33 +68,6 @@ def ping():
     """
     return html
 
-@api.route('/login', methods=['POST'])
-def login(): #Add user to session
-    try:
-        username = request.json.get('username')
-        password = request.json.get('password')
-        
-        if checkPassword(username,password):
-            username_hash = hashlib.sha256((username + dt.now.__str__()).encode()).hexdigest()
-            print(f"------------------User {username} logged in as {username_hash}------------------\n\n")
-            session.append(username_hash)
-            return jsonify({'secretAuth': username_hash}), 200
-        else:
-            return jsonify({'message': 'login failed'}), 401
-    except Exception as e:
-        print(f"Error logging in ----> {e}\n\n")
-        return jsonify({'message': 'error logging in'}), 500
-
-@api.route('/logout')
-@login_required
-def logout(): #Remove user from session
-    try:
-        username_hash = request.headers.get('hash')
-        session.pop(username_hash)
-        return jsonify({'message': 'logout successful'}), 200
-    except Exception as e:
-        print(f"Error logging out ----> {e}\n\n")
-        return jsonify({'message': 'error logging out'}), 500
 
 @api.route('/insert', methods=['POST'])
 @login_required
@@ -119,14 +75,16 @@ def addToDB():
     try:
         name = request.json['username']
         plate = request.json['plate']
-        invoice = request.json['invoice']
+        house = request.json['house']
+        model = request.json['model']
         inicial_time = request.json['in_time']
         final_time = request.json['out_time']
-        print(f"Adding to parking register ----> {name} {plate} {invoice} {inicial_time} {final_time}\n\n")
-        mongo.db.parkings.insert_one({"username": name, "plate": plate, "invoice": invoice, "in_time": inicial_time, "out_time": final_time, "status": "active"})
+        print(f"Adding to parking register ----> {name} {plate} {house} {inicial_time} {final_time}\n\n")
+        user = mongo.db.parkings.insert_one({"username": name, "plate": plate, "house": house,"model":model, "in_time": inicial_time, "out_time": final_time,"inside": True, "status": "active"})
         #database = connect_to_database()
         #parking_collection = database['Parkings']
-        print(f"Adding to parking register ----> {name} {plate} {invoice} {inicial_time} {final_time}\n\n")
+        print(f"Adding to parking register ----> {name} {plate} {house} {inicial_time} {final_time}\n\n")
+        print(f"this user  inserted a parking ----> {user}\n\n")
         #id = len(list(database['Parkings'].find())) + 1
         #parking_collection.insert_one({'id': id,'name': name, 'plate': plate, 'invoice': invoice, 'in_time': inicial_time, 'out_time': final_time, 'status': 'active'})
         return jsonify({'message': 'added to parking register'}), 200 #TODO: search a less silly message
@@ -143,38 +101,71 @@ def getParkingDB(): # get all the parkings of the user
         # Convert the cursor to a list and modify the '_id' field
         parkings_list = []
         for parking in parkings:
-            parking['id'] = str(parking['_id'])  # Convert ObjectId to string
+            parking['id_'] = str(parking['_id'])  # Convert ObjectId to string
             del parking['_id']  # Remove the original _id field
             parkings_list.append(parking)
         
         responseList = json_util.dumps(parkings_list)
-
+        print(f"Getting parkings ----> \n\n")
         return Response(responseList, mimetype='application/json'), 200
     except Exception as e:
         print(f"Error getting parkings ----> {e}\n\n")
         return jsonify({'message': 'error getting parkings'}), 500
     
-@api.route('/delete', methods=['POST'])
+@api.route('/delete/<id>', methods=['POST'])
 @login_required
-def deleteFromDB():
+def deleteFromDB(id):
     try:
-        id = request.json.get('Id')
-
-        try:
-            id = int(id)
-            print(id)
-        except Exception as e:
-            print(f"Error converting id to int ----> {e}\n\n")
-            return jsonify({'message': 'the id given is not valid'}), 400
         
-        database = connect_to_database()
-        parking_collection = database['Parkings']
-
-        parking_collection.update_one(filter={'id': id}, update={'$set': {'status': 'inactive'}})
+        userFound = mongo.db.parkings.find_one({"_id": ObjectId (id)})    
+        print(userFound)  
+        mongo.db.parkings.delete_one({"_id": ObjectId (id)})
+        
         return jsonify({'message': 'deleted from parking register'}), 200 
     except Exception as e:
         print(f"Error deleting from parking register ----> {e}\n\n")
         return jsonify({'message': 'error deleting from parking register'}), 500
+'''  
+@api.route('/update', methods=['PUT'])
+@login_required
+def update_employee():
+    try:
+        data = request.json
+        employee_id = data.get('id_')
+        updates = {
+            "username": data.get('username'),
+            "plate": data.get('plate'),
+            "house": data.get('house'),
+            "model": data.get('model'),
+            "in_time": data.get('in_time'),
+            "out_time": data.get('out_time')
+        }
+        
+        result = mongo.db.parkings.update_one({"_id": employee_id}, {"$set": updates})
+        
+        if result.modified_count > 0:
+            return jsonify({'message': 'Employee updated successfully'}), 200
+        else:
+            return jsonify({'message': 'No changes made or employee not found'}), 404
+    except Exception as e:
+        return jsonify({'message': f'Error updating employee: {e}'}), 500
+'''
+@api.route('/update/<id>', methods=['PUT'])
+def update_parking(id):
+    print(id)
+    updates = {
+        "username": request.json.get('username'),
+        "plate": request.json.get('plate'),
+        "house": request.json.get('house'),
+        "model":request.json.get('model'),
+        "in_time": request.json.get('in_time'),
+        "out_time": request.json.get('out_time')
+        }
+
+    mongo.db.parkings.update_one({"_id": ObjectId (id)}, {"$set": updates})
+    
+    response = jsonify({'message': 'User ' + id + ' was Updated successfully'})
+    return response
     
 @api.route('/plate', methods=['POST'])
 def plate():
@@ -204,32 +195,33 @@ def insert_plate():
         return jsonify({'message': 'error inserting plate'}), 500
     
 
-@api.route('/update', methods=['POST'])
-@login_required
-def updateDB():
+@api.route('/user', methods=['POST'])
+def user():
     try:
-        id = request.json.get('Id')
-        
-        try:
-            id = int(id)
-        except Exception as e:
-            print(f"Error converting id to int ----> {e}\n\n")
-            return jsonify({'message': 'the id given is not valid'}), 400
-        
-        print(f"Updating parking register ----> {id}\n\n")
-        new_name = request.json.get('new_name')
-        new_plate = request.json.get('new_plate')
-        new_invoice = request.json.get('new_invoice')
-        new_inicial_time = request.json.get('new_inicial_time')
-        new_final_time = request.json.get('new_final_time')
-
-        database = connect_to_database()
-        parking_collection = database['Parkings']
-        parking_collection.update_one({'id': id}, {'$set': {'name': new_name, 'plate': new_plate, 'in_time': new_inicial_time, 'out_time': new_final_time, 'invoice': new_invoice}})
-        return jsonify({'message': 'updated parking register'}), 200 #TODO: search a less silly message
+        username = request.json.get('username')
+        password = request.json.get('password')
+        password_bytes = password.encode('utf-8')
+        salt = bcrypt.gensalt()
+        hashed_password = bcrypt.hashpw(password_bytes, salt)
+        print(hashed_password)
+        if(username and password):
+            mongo.db.users.insert_one({'username': username,'password':hashed_password})
+        return jsonify({'message': 'User  {username}  created'}), 200
     except Exception as e:
-        print(f"Error updating parking register ----> {e}\n\n")
-        return jsonify({'message': 'error updating parking register'}), 500
+        print(f"Error creating user ----> {e}\n\n")
+        return jsonify({'message': 'error creating User'}), 500
+
+@api.route('/removeUser', methods=['POST'])
+def removeUser():
+    try:
+        plate = request.json.get('plate')
+        print(f"Inserting plate ----> {plate}\n\n")
+        mongo.db.plates.insert_one({'plate': plate})
+        return jsonify({'message': ' {plate} plate inserted'}), 200
+    except Exception as e:
+        print(f"Error inserting plate ----> {e}\n\n")
+        return jsonify({'message': 'error inserting plate'}), 500     
+
 
 if __name__ == '__main__':
     api.run(debug=True, host='0.0.0.0', port=6970)

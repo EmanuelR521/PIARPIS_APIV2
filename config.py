@@ -9,7 +9,7 @@ class config:
             self.ia_ip = config['ia']['ip']
             self.ia_port = config['ia']['port']
             self.ia_token = config['ia']['token']
-            self.flask_secret = config['flask']['secret']
+            self.jwt_secret = config['jwt']['secret']
             
             
             
